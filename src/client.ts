@@ -3,8 +3,10 @@ import type {
     PayuOrderCreateRequest,
     PayuOrderCreateResponse,
     PayuOauthAuthorizeResponse,
+    PayuPaymethodsRequest,
     PayuPaymethodsResponse,
     PayuOrderTransactionsResponse,
+    PayuNotifyRequest,
 } from "./types.js";
 import crypto from "crypto";
 
@@ -16,11 +18,14 @@ export interface PayuConfig {
     sandbox?: boolean; // Use sandbox environment (default: false)
 }
 
+const ACCESS_TOKEN_EXPIRY_MARGIN_SECONDS = 60;
+
 export class PayuClient {
     private readonly api: AxiosInstance;
     private readonly config: PayuConfig;
     private readonly baseUrl: string;
     private accessTokenResponse: PayuOauthAuthorizeResponse | null = null;
+    private accessTokenExpiresAt: number = 0; // Absolute timestamp (ms) at which the cached access token expires.
 
     constructor(config: PayuConfig) {
         this.config = config;
@@ -29,10 +34,12 @@ export class PayuClient {
             baseURL: this.baseUrl,
         });
         this.api.interceptors.request.use(async (config) => {
-            if (this.accessTokenResponse === null || Date.now() >= this.accessTokenResponse.expires_in * 1000) {
+            if (this.accessTokenResponse === null || Date.now() >= this.accessTokenExpiresAt) {
                 // Generate new access token if we don't have one or if it's expired
                 console.log({ message: "Generating new PayU access token" });
                 this.accessTokenResponse = await this.getAccessToken();
+                this.accessTokenExpiresAt =
+                    Date.now() + (this.accessTokenResponse.expires_in - ACCESS_TOKEN_EXPIRY_MARGIN_SECONDS) * 1000;
             }
             //console.log(this.accessTokenResponse);
             config.headers["Authorization"] = `Bearer ${this.accessTokenResponse.access_token}`;
@@ -105,16 +112,37 @@ export class PayuClient {
         return response.data;
     }
 
-    async getPaymentMethods(lang?: string): Promise<PayuPaymethodsResponse> {
+    async getPayMethods(params?: PayuPaymethodsRequest): Promise<PayuPaymethodsResponse> {
         const response = await this.api.get<PayuPaymethodsResponse>("/api/v2_1/paymethods", {
-            params: {
-                lang,
-            },
+            params,
         });
         return response.data;
     }
 
-    validateSignature(receivedBody: string, receivedSignature: string): boolean {
+    /** Validates a PayU webhook notification (`notifyUrl` POST) and returns its typed body. Throws if the signature is missing or invalid. */
+    async parseNotification(request: Request): Promise<PayuNotifyRequest> {
+        const signatureHeader = request.headers.get("OpenPayu-Signature");
+        if (!signatureHeader) {
+            throw new Error("Missing OpenPayu-Signature header");
+        }
+
+        const receivedSignature = signatureHeader
+            .split(";")
+            .map((part) => part.trim().split("="))
+            .find(([key]) => key === "signature")?.[1];
+        if (!receivedSignature) {
+            throw new Error("Missing signature in OpenPayu-Signature header");
+        }
+
+        const body = await request.text();
+        if (!this.validateSignature(body, receivedSignature)) {
+            throw new Error("Invalid PayU notification signature");
+        }
+
+        return JSON.parse(body) as PayuNotifyRequest;
+    }
+
+    private validateSignature(receivedBody: string, receivedSignature: string): boolean {
         const concatenated = receivedBody + this.config.secondKey;
         const calculatedSignature = this.calculateMD5(concatenated);
         return calculatedSignature === receivedSignature;
@@ -122,5 +150,100 @@ export class PayuClient {
 
     private calculateMD5(data: string): string {
         return crypto.createHash("md5").update(data).digest("hex");
+    }
+}
+
+export interface PayuCustomerConfig {
+    email: string;
+    extCustomerId: string;
+}
+
+export class PayuTrustedMerchantClient {
+    private readonly api: AxiosInstance;
+    private readonly baseUrl: string;
+    private accessTokenResponse: PayuOauthAuthorizeResponse | null = null;
+    private accessTokenExpiresAt = 0; // Absolute timestamp (ms) at which the cached access token expires.
+
+    constructor(
+        private readonly config: PayuConfig,
+        private readonly customer: PayuCustomerConfig
+    ) {
+        this.config = config;
+        this.baseUrl = config.sandbox ? "https://secure.snd.payu.com" : "https://secure.payu.com";
+        this.api = axios.create({
+            baseURL: this.baseUrl,
+        });
+        this.api.interceptors.request.use(async (config) => {
+            if (this.accessTokenResponse === null || Date.now() >= this.accessTokenExpiresAt) {
+                // Generate new access token if we don't have one or if it's expired
+                console.log({ message: "Generating new PayU access token" });
+                this.accessTokenResponse = await this.getAccessToken();
+                this.accessTokenExpiresAt =
+                    Date.now() + (this.accessTokenResponse.expires_in - ACCESS_TOKEN_EXPIRY_MARGIN_SECONDS) * 1000;
+            }
+            //console.log(this.accessTokenResponse);
+            config.headers["Authorization"] = `Bearer ${this.accessTokenResponse.access_token}`;
+            // this.api.defaults.headers.common["Authorization"] = `Bearer ${this.accessTokenResponse.access_token}`;
+            return config;
+        });
+        this.api.interceptors.response.use(
+            (response) => response,
+            (error: AxiosError) => {
+                console.error({ message: "PayU API error", errorResponse: error.response?.data });
+                throw error;
+            }
+        );
+
+        console.log({
+            message: "PayU API initialized",
+            baseUrl: this.baseUrl,
+        });
+    }
+
+    async getAccessToken(): Promise<PayuOauthAuthorizeResponse> {
+        const response = await axios.post<PayuOauthAuthorizeResponse>(
+            this.baseUrl + "/pl/standard/user/oauth/authorize",
+            {
+                grant_type: "trusted_merchant",
+                client_id: this.config.clientId,
+                client_secret: this.config.clientSecret,
+                email: this.customer.email,
+                // The OAuth endpoint takes snake_case, unlike the rest of the API
+                ext_customer_id: this.customer.extCustomerId,
+            },
+            {
+                headers: {
+                    "Content-Type": "application/x-www-form-urlencoded",
+                },
+            }
+        );
+
+        return response.data;
+    }
+
+    /**
+     * Retrieves the payment methods available for the customer, including their saved
+     * card and BLIK tokens.
+     * GET /api/v2_1/paymethods
+     */
+    async getPayMethods(params: PayuPaymethodsRequest = {}): Promise<PayuPaymethodsResponse> {
+        const response = await this.api.get<PayuPaymethodsResponse>("/api/v2_1/paymethods", {
+            params,
+        });
+
+        return response.data;
+    }
+
+    /**
+     * Deletes a saved token of the customer - call it when the customer removes the stored
+     * card or terminates their account.
+     * DELETE /api/v2_1/tokens/{token}
+     */
+    async deleteToken(token: string): Promise<void> {
+        await this.api.delete(`/api/v2_1/tokens/${encodeURIComponent(token)}`, {
+            headers: {
+                "Content-Type": "application/json",
+            },
+        });
     }
 }

@@ -416,6 +416,13 @@ export interface PayuOrderCreateRequest {
     };
 }
 
+export interface PayuPaymethodsRequest {
+    /** Language code, ISO-639-1 compliant, determines language of description in the `name` field. */
+    lang?: string;
+    /** Determines the availability and parameters of specific features, e.g. "clickToPay". */
+    features?: string;
+}
+
 export interface PayuPaymethodsResponse {
     /** Section containing saved BLIK tokens. */
     blikTokens?: Array<{
@@ -591,6 +598,107 @@ export interface PayuOrderTransactionsResponse {
         };
     }>;
 }
+
+export interface PayuNotifyProduct {
+    name: string;
+    unitPrice: string;
+    quantity: string;
+    /** Not returned by PayU even if sent when the order was created. */
+    virtual?: boolean;
+}
+
+export interface PayuNotifyShoppingCart {
+    extCustomerId: string;
+    amount: number;
+    fee?: string;
+    shippingMethods?: Array<{ country: string; price: string; name: string }>;
+    products: PayuNotifyProduct[];
+}
+
+interface PayuNotifyOrderBase {
+    shippingMethod?: { country?: string; price?: string; name?: string };
+    orderId?: string;
+    extOrderId?: string;
+    orderCreateDate?: string;
+    notifyUrl?: string;
+    customerIp?: string;
+    merchantPosId?: string;
+    description?: string;
+    additionalDescription?: string;
+    validityTime?: string;
+    currencyCode?: string;
+    totalAmount?: string;
+    capturedAmount?: string;
+    buyer?: {
+        extCustomerId?: string;
+        email?: string;
+        phone?: string;
+        firstName?: string;
+        lastName?: string;
+        nin?: string;
+    };
+    payMethod?: { amount?: string; type?: "PBL" | "CARD_TOKEN" | "INSTALLMENTS" };
+    products?: PayuNotifyProduct[];
+    shoppingCarts?: PayuNotifyShoppingCart[];
+    merchantFunds?: Array<{ type?: "COUPON"; value?: string; amount?: string }>;
+    status?: "NEW" | "PENDING" | "WAITING_FOR_CONFIRMATION" | "COMPLETED" | "CANCELED";
+}
+
+export interface PayuNotifyOrder extends PayuNotifyOrderBase {}
+
+export interface PayuNotifyEnrichedOrder extends PayuNotifyOrderBase {
+    /** URL of the payment page for this order. */
+    orderUrl?: string;
+    authorization?: {
+        amount?: string;
+        currencyCode?: string;
+        serviceProcessingType?: "PSP" | "TSP";
+        status?: "AUTHORIZED" | "SOFT_DECLINED" | "REJECTED" | "PENDING";
+        createDate?: string;
+        resultDate?: string;
+        validUntil?: string;
+        payType?: string;
+        paymentFlow?: string;
+        /** Shape depends on payType (card/blik/paypal); left untyped. */
+        payTypeDetails?: Record<string, unknown>;
+    };
+    capture?: {
+        amount?: string;
+        currencyCode?: string;
+        date?: string;
+        /** Shape depends on payType (card/paypal); left untyped. */
+        payTypeDetails?: Record<string, unknown>;
+    };
+    fees?: Array<{ amount?: string; currencyCode?: string; type?: string }>;
+    mcpData?: { amount?: string; currencyCode?: string; rate?: string };
+}
+
+export interface PayuNotifyProperty {
+    name?: string;
+    value?: string;
+}
+
+export interface PayuNotifyRefund {
+    orderId: string;
+    extOrderId?: string;
+    refund: {
+        refundId?: string;
+        extRefundId?: string;
+        amount?: string;
+        currencyCode?: string;
+        status?: "FINALIZED" | "CANCELLED";
+        statusDateTime?: string;
+        reason?: string;
+        reasonDescription?: string;
+        refundDate?: string;
+    };
+}
+
+/** Body of a PayU webhook notification (POST to your `notifyUrl`). */
+export type PayuNotifyRequest =
+    | { order: PayuNotifyOrder; properties?: PayuNotifyProperty[] }
+    | { order: PayuNotifyEnrichedOrder; properties?: PayuNotifyProperty[] }
+    | PayuNotifyRefund;
 
 export interface PayuOrderCreateResponse {
     status?: {
