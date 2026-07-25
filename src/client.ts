@@ -1,4 +1,4 @@
-import axios, { AxiosError, type AxiosInstance } from "axios";
+import axios, { AxiosError, type AxiosInstance, type AxiosResponse } from "axios";
 import type {
     PayuOrderCreateRequest,
     PayuOrderCreateResponse,
@@ -20,44 +20,63 @@ export interface PayuConfig {
 
 const ACCESS_TOKEN_EXPIRY_MARGIN_SECONDS = 60;
 
+/** Builds an axios instance that attaches a cached OAuth bearer token. Failed responses reject with axios's own `AxiosError` (axios's default behavior), so callers can use `axios.isAxiosError()`. */
+function createPayuHttpClient(
+    baseUrl: string,
+    getAccessToken: () => Promise<PayuOauthAuthorizeResponse>
+): { api: AxiosInstance; getValidAccessToken: () => Promise<PayuOauthAuthorizeResponse> } {
+    let cachedToken: PayuOauthAuthorizeResponse | null = null;
+    let cachedTokenExpiresAt = 0; // Absolute timestamp (ms) at which the cached access token expires.
+
+    async function getValidAccessToken(): Promise<PayuOauthAuthorizeResponse> {
+        if (cachedToken === null || Date.now() >= cachedTokenExpiresAt) {
+            cachedToken = await getAccessToken();
+            cachedTokenExpiresAt = Date.now() + (cachedToken.expires_in - ACCESS_TOKEN_EXPIRY_MARGIN_SECONDS) * 1000;
+        }
+        return cachedToken;
+    }
+
+    const api = axios.create({ baseURL: baseUrl });
+
+    api.interceptors.request.use(async (config) => {
+        const token = await getValidAccessToken();
+        config.headers["Authorization"] = `Bearer ${token.access_token}`;
+        return config;
+    });
+
+    return { api, getValidAccessToken };
+}
+
+/** Builds an AxiosError from a raw `fetch` Response, so callers can use `axios.isAxiosError()` uniformly regardless of which HTTP client handled the request. */
+async function fetchResponseToAxiosError(response: Response): Promise<AxiosError> {
+    const data = await response.text().catch(() => undefined);
+    return new AxiosError(
+        `Unexpected PayU response status: ${response.status}`,
+        AxiosError.ERR_BAD_RESPONSE,
+        undefined,
+        undefined,
+        {
+            data,
+            status: response.status,
+            statusText: response.statusText,
+            headers: {},
+            config: {},
+        } as unknown as AxiosResponse
+    );
+}
+
 export class PayuClient {
     private readonly api: AxiosInstance;
+    private readonly getValidAccessToken: () => Promise<PayuOauthAuthorizeResponse>;
     private readonly config: PayuConfig;
     private readonly baseUrl: string;
-    private accessTokenResponse: PayuOauthAuthorizeResponse | null = null;
-    private accessTokenExpiresAt: number = 0; // Absolute timestamp (ms) at which the cached access token expires.
 
     constructor(config: PayuConfig) {
         this.config = config;
         this.baseUrl = config.sandbox ? "https://secure.snd.payu.com" : "https://secure.payu.com";
-        this.api = axios.create({
-            baseURL: this.baseUrl,
-        });
-        this.api.interceptors.request.use(async (config) => {
-            if (this.accessTokenResponse === null || Date.now() >= this.accessTokenExpiresAt) {
-                // Generate new access token if we don't have one or if it's expired
-                console.log({ message: "Generating new PayU access token" });
-                this.accessTokenResponse = await this.getAccessToken();
-                this.accessTokenExpiresAt =
-                    Date.now() + (this.accessTokenResponse.expires_in - ACCESS_TOKEN_EXPIRY_MARGIN_SECONDS) * 1000;
-            }
-            //console.log(this.accessTokenResponse);
-            config.headers["Authorization"] = `Bearer ${this.accessTokenResponse.access_token}`;
-            // this.api.defaults.headers.common["Authorization"] = `Bearer ${this.accessTokenResponse.access_token}`;
-            return config;
-        });
-        this.api.interceptors.response.use(
-            (response) => response,
-            (error: AxiosError) => {
-                console.error({ message: "PayU API error", errorResponse: error.response?.data });
-                throw error;
-            }
-        );
-
-        console.log({
-            message: "PayU API initialized",
-            baseUrl: this.baseUrl,
-        });
+        const client = createPayuHttpClient(this.baseUrl, () => this.getAccessToken());
+        this.api = client.api;
+        this.getValidAccessToken = client.getValidAccessToken;
     }
 
     async getAccessToken(): Promise<PayuOauthAuthorizeResponse> {
@@ -79,16 +98,14 @@ export class PayuClient {
     }
 
     async createOrder(data: Omit<PayuOrderCreateRequest, "merchantPosId">): Promise<PayuOrderCreateResponse> {
-        if (this.accessTokenResponse === null || Date.now() >= this.accessTokenResponse.expires_in * 1000) {
-            this.accessTokenResponse = await this.getAccessToken();
-        }
+        const { access_token } = await this.getValidAccessToken();
 
         // We need to use here raw fetch because axios does not support cloudflare's "redirect" option
         const response = await fetch(`${this.baseUrl}/api/v2_1/orders`, {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
-                Authorization: `Bearer ${this.accessTokenResponse.access_token}`,
+                Authorization: `Bearer ${access_token}`,
             },
             body: JSON.stringify({
                 ...data,
@@ -99,9 +116,7 @@ export class PayuClient {
 
         // PayU returns 302 - on CF Workers with redirect: "manual" status is 0 (opaqueredirect)
         if (response.status !== 302 && response.status !== 0) {
-            const errorText = await response.text();
-            console.error({ message: "PayU API error", status: response.status, errorText });
-            throw new Error(`Unexpected PayU response status: ${response.status}`);
+            throw await fetchResponseToAxiosError(response);
         }
 
         return response.json() as Promise<PayuOrderCreateResponse>;
@@ -161,8 +176,6 @@ export interface PayuCustomerConfig {
 export class PayuTrustedMerchantClient {
     private readonly api: AxiosInstance;
     private readonly baseUrl: string;
-    private accessTokenResponse: PayuOauthAuthorizeResponse | null = null;
-    private accessTokenExpiresAt = 0; // Absolute timestamp (ms) at which the cached access token expires.
 
     constructor(
         private readonly config: PayuConfig,
@@ -170,34 +183,7 @@ export class PayuTrustedMerchantClient {
     ) {
         this.config = config;
         this.baseUrl = config.sandbox ? "https://secure.snd.payu.com" : "https://secure.payu.com";
-        this.api = axios.create({
-            baseURL: this.baseUrl,
-        });
-        this.api.interceptors.request.use(async (config) => {
-            if (this.accessTokenResponse === null || Date.now() >= this.accessTokenExpiresAt) {
-                // Generate new access token if we don't have one or if it's expired
-                console.log({ message: "Generating new PayU access token" });
-                this.accessTokenResponse = await this.getAccessToken();
-                this.accessTokenExpiresAt =
-                    Date.now() + (this.accessTokenResponse.expires_in - ACCESS_TOKEN_EXPIRY_MARGIN_SECONDS) * 1000;
-            }
-            //console.log(this.accessTokenResponse);
-            config.headers["Authorization"] = `Bearer ${this.accessTokenResponse.access_token}`;
-            // this.api.defaults.headers.common["Authorization"] = `Bearer ${this.accessTokenResponse.access_token}`;
-            return config;
-        });
-        this.api.interceptors.response.use(
-            (response) => response,
-            (error: AxiosError) => {
-                console.error({ message: "PayU API error", errorResponse: error.response?.data });
-                throw error;
-            }
-        );
-
-        console.log({
-            message: "PayU API initialized",
-            baseUrl: this.baseUrl,
-        });
+        this.api = createPayuHttpClient(this.baseUrl, () => this.getAccessToken()).api;
     }
 
     async getAccessToken(): Promise<PayuOauthAuthorizeResponse> {
