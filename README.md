@@ -58,4 +58,23 @@ const token = cardTokens?.[0]?.value;
 if (token) await client.deleteToken(token);
 ```
 
+### Webhook notifications
+
+Use `parseNotification` to verify and parse PayU webhook calls to your `notifyUrl`. It checks the `OpenPayu-Signature` header against the raw body and throws if the signature is missing or invalid.
+
+```ts
+// e.g. a Next.js route handler / any Request-based HTTP framework
+export async function POST(request: Request) {
+    const notification = await client.parseNotification(request);
+
+    if ("order" in notification && notification.order.status === "COMPLETED") {
+        // mark the order as paid
+    }
+
+    return new Response(null, { status: 200 });
+}
+```
+
+> Note: `parseNotification` reads the body via `request.text()`, so pass it the raw `Request` before any other code consumes the body.
+
 > Note: Not all endpoints are implemented yet. If you need an endpoint that is not implemented, feel free to open up a pull request :)
