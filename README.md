@@ -29,3 +29,5 @@ const order = await client.createOrder({
     products: [{ name: "Product", unitPrice: "1000", quantity: "1" }],
 });
 ```
+
+> Note: Not all endpoints are implemented yet. If you need an endpoint that is not implemented, feel free to open up a pull request :)
