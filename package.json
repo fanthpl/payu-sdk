@@ -1,6 +1,6 @@
 {
     "name": "@fanth/payu-sdk",
-    "version": "0.1.1",
+    "version": "0.1.2",
     "description": "TypeScript SDK for the PayU REST API",
     "type": "module",
     "sideEffects": false,

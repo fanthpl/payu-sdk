@@ -425,82 +425,92 @@ export interface PayuPaymethodsRequest {
 
 export interface PayuPaymethodsResponse {
     /** Section containing saved BLIK tokens. */
-    blikTokens?: Array<{
-        /** BLIK token value. */
-        value?: string;
-        /** Type of the token. Either UID for normal transactions or PAYID for recurring payments. */
-        type?: "UID" | "PAYID";
-        brandImageUrl?: string;
-        /** Array containing objects about available installments options. */
-        bankApplicationReferences?: Array<{
-            /** Unique key for assignment of particular banking application to a token. Inserted in `payMethod.blikData.appKey`. */
-            key?: string;
-            /** Label presented to the customer when selecting a banking application for the UID token. */
-            label?: string;
-        }>;
-        /** Contains information about the recurring payment. */
-        recurring?: {
-            /** BLIK recurring payment title. */
-            aliasLabel?: string;
-            /** Type of the recurring payment. */
-            type?: "O";
-            /** Date of the first transaction in the recurring payment cycle without customer confirmation. */
-            initializationDate?: string;
-            /** Expiration date of the PAYID token. Max 10 years from creation. Indefinite if not provided. */
-            expirationDate?: string;
-        };
-    }>;
+    blikTokens?: Array<BlikToken>;
 
     /** Section containing saved card tokens. */
-    cardTokens?: Array<{
-        value?: string;
-        brandImageUrl?: string;
-        preferred?: boolean;
-        status?: "NEW" | "ACTIVE" | "EXPIRED";
-        cardExpirationYear?: number;
-        cardExpirationMonth?: number;
-        cardNumberMasked?: string;
-        cardScheme?: string;
-        cardBrand?: string;
-    }>;
+    cardTokens?: Array<CardToken>;
 
     /** Section containing available PayByLink payment methods. */
-    payByLinks?: Array<{
-        /** `payType` value. */
-        value?: string;
-        /** Link to `payType` logo graphic on PayU server. */
-        brandImageUrl?: string;
-        /** Name of `payType` set by PayU. */
-        name?: string;
-        status?: "ENABLED" | "DISABLED" | "TEMPORARY_DISABLED";
-        minAmount?: number;
-        maxAmount?: number;
-        /** List of features available. */
-        features?: {
-            clickToPay?: {
-                brandImageUrl?: string;
-                /** Click to Pay Mastercard feature. */
-                mastercard?: {
-                    status?: "ENABLED" | "DISABLED";
-                    /** Merchant ID in Mastercard Click to Pay. */
-                    dpaId?: string;
-                };
-                /** Click to Pay Visa feature. */
-                visa?: {
-                    status?: "ENABLED" | "DISABLED";
-                    /** Merchant ID in Visa Click to Pay. */
-                    dpaId?: string;
-                    /** Acquirer Bank Identification Number for Click to Pay transactions. */
-                    acquirerBIN?: string;
-                    /** Acquirer Merchant ID for Click to Pay transactions. */
-                    acquirerMerchantId?: string;
-                };
-            };
-        };
-    }>;
+    payByLinks?: Array<PayByLink>;
 
     status?: {
         statusCode?: "SUCCESS";
+    };
+}
+
+export interface BlikToken {
+    /** BLIK token value. */
+    value?: string;
+    /** Type of the token. Either UID for normal transactions or PAYID for recurring payments. */
+    type?: "UID" | "PAYID";
+    brandImageUrl?: string;
+    /** Array containing objects about available installments options. */
+    bankApplicationReferences?: Array<{
+        /** Unique key for assignment of particular banking application to a token. Inserted in `payMethod.blikData.appKey`. */
+        key?: string;
+        /** Label presented to the customer when selecting a banking application for the UID token. */
+        label?: string;
+    }>;
+    /** Contains information about the recurring payment. */
+    recurring?: {
+        /** BLIK recurring payment title. */
+        aliasLabel?: string;
+        /** Type of the recurring payment. */
+        type?: "O";
+        /** Date of the first transaction in the recurring payment cycle without customer confirmation. */
+        initializationDate?: string;
+        /** Expiration date of the PAYID token. Max 10 years from creation. Indefinite if not provided. */
+        expirationDate?: string;
+    };
+}
+
+export interface CardToken {
+    /** Token value, e.g. "TOKC_XATB7DF8ACXYTVQIPLWTVPFRKQE". */
+    value?: string;
+    brandImageUrl?: string;
+    preferred?: boolean;
+    status?: "NEW" | "ACTIVE" | "EXPIRED";
+    cardExpirationYear?: number;
+    cardExpirationMonth?: number;
+    /** Masked card number, e.g. "411111******1111". */
+    cardNumberMasked?: string;
+    /** Card scheme, e.g. "VS". */
+    cardScheme?: string;
+    /** Card brand, e.g. "VISA". */
+    cardBrand?: string;
+}
+
+export interface PayByLink {
+    /** `payType` value. */
+    value?: string;
+    /** Link to `payType` logo graphic on PayU server. */
+    brandImageUrl?: string;
+    /** Name of `payType` set by PayU. */
+    name?: string;
+    status?: "ENABLED" | "DISABLED" | "TEMPORARY_DISABLED";
+    minAmount?: number;
+    maxAmount?: number;
+    /** List of features available. */
+    features?: {
+        clickToPay?: {
+            brandImageUrl?: string;
+            /** Click to Pay Mastercard feature. */
+            mastercard?: {
+                status?: "ENABLED" | "DISABLED";
+                /** Merchant ID in Mastercard Click to Pay. */
+                dpaId?: string;
+            };
+            /** Click to Pay Visa feature. */
+            visa?: {
+                status?: "ENABLED" | "DISABLED";
+                /** Merchant ID in Visa Click to Pay. */
+                dpaId?: string;
+                /** Acquirer Bank Identification Number for Click to Pay transactions. */
+                acquirerBIN?: string;
+                /** Acquirer Merchant ID for Click to Pay transactions. */
+                acquirerMerchantId?: string;
+            };
+        };
     };
 }
 
