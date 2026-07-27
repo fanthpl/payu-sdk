@@ -8,6 +8,12 @@ TypeScript SDK for the [PayU REST API](https://developers.payu.com/europe/docs/)
 npm install @fanth/payu-sdk
 ```
 
+With [pnpm](https://pnpm.io/):
+
+```bash
+pnpm add @fanth/payu-sdk
+```
+
 ## Usage
 
 See examples in [examples](./examples) directory.
