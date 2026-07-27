@@ -10,6 +10,8 @@ npm install @fanth/payu-sdk
 
 ## Usage
 
+See examples in [examples](./examples) directory.
+
 ```ts
 import { PayuClient } from "@fanth/payu-sdk";
 
