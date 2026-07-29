@@ -79,7 +79,7 @@ export async function POST(request: Request) {
         // mark the order as paid
     }
 
-    return new Response(null, { status: 200 });
+    return new Response("OK", { status: 200 });
 }
 ```
 
