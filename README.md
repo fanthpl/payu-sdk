@@ -1,6 +1,6 @@
 # @fanth/payu-sdk
 
-TypeScript SDK for the [PayU REST API](https://developers.payu.com/europe/docs/).
+TypeScript SDK for the [PayU REST API](https://developers.payu.com/europe/api/) ([docs](https://developers.payu.com/europe/docs/)).
 
 ## Install
 
@@ -33,7 +33,7 @@ const order = await client.createOrder({
     customerIp: "127.0.0.1",
     description: "Order #1",
     currencyCode: "PLN",
-    totalAmount: "1000",
+    totalAmount: "1000", // In grosze
     products: [{ name: "Product", unitPrice: "1000", quantity: "1" }],
 });
 ```
